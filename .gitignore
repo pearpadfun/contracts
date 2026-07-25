@@ -1,0 +1,11 @@
+out/
+cache/
+broadcast/
+lib/
+.env
+.env.*
+!.env.example
+*.key
+*.keystore
+keystore*
+docs/
