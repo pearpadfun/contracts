@@ -34,6 +34,17 @@ All live on chain 988 and verified on [Stablescan](https://stablescan.xyz).
 - **PearpadRouter**: buy/sell entrypoint over the curve.
 - **PearpadLocker**: locks graduated LP.
 
+## Integration
+
+Building on top of pearpad? See **[INTEGRATION.md](INTEGRATION.md)** — the full buy/sell guide (two trading phases, quote math, viem/ethers examples).
+
+Contract ABIs live in [`abi/`](abi/), ready for viem/ethers:
+
+- [`abi/PearpadFactory.json`](abi/PearpadFactory.json) — launch + bonding-curve trading
+- [`abi/PearpadRouter.json`](abi/PearpadRouter.json) — post-graduation swaps
+- [`abi/PearpadToken.json`](abi/PearpadToken.json) — the per-launch ERC-20
+- [`abi/PearpadLocker.json`](abi/PearpadLocker.json) — locked LP
+
 ## Build
 
 Dependencies are not vendored. Install them with [Foundry](https://getfoundry.sh):
