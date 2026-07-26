@@ -1,14 +1,27 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
-//                       ▄▄
-//                      ▐██▌
-//                  ▄████████▄
-//                ▄███▀    ▀███▄
-//               ▐███      ███▌
-//               ▐███▄    ▄███▌
-//                ▀████▄▄▄▄████▀
-//                  ▀▀██████▀▀
+//                             ▄████
+//                            ▄████
+//                            ███▀
+//                            ██
+//                 ▄█████████▄
+//               ▄█████████████▄
+//               ███████████████
+//               ███████████████
+//              ▄██████████████▀
+//             ▄██████████████
+//           ▄████████████████
+//          ▄█████████████████
+//         ▄██████████████████▄
+//         █████████████████████▄▄
+//         ████████████████████████▄▄
+//         ███████████████████████████
+//         ███████████████████████████
+//          █████████████████████████
+//           ▀█████████████████████▀
+//             ▀▀████████████████▀
+//                 ▀▀▀▀▀▀▀▀▀▀▀▀
 //
 //  ██████╗ ███████╗ █████╗ ██████╗ ██████╗  █████╗ ██████╗
 //  ██╔══██╗██╔════╝██╔══██╗██╔══██╗██╔══██╗██╔══██╗██╔══██╗
@@ -17,49 +30,69 @@ pragma solidity ^0.8.24;
 //  ██║     ███████╗██║  ██║██║  ██║██║     ██║  ██║██████╔╝
 //  ╚═╝     ╚══════╝╚═╝  ╚═╝╚═╝  ╚═╝╚═╝     ╚═╝  ╚═╝╚═════╝
 //
-//  pear-v1.0.0 · Stable chain (id 988) · https://pearpad.fun · © 2026 PEARPAD
+//  pear-v2.0.0 · Stable chain (id 988) · https://pearpad.fun · © 2026 PEARPAD
 
 import {IERC20} from "openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
 import {ISwapRouter} from "./PearpadLocker.sol";
 
-/// @notice Pearpad swap router: 1% platform fee, then the pool.
-/// On Stable, USDT0 is both the native gas token (18 dec) and an ERC-20 (6 dec)
-/// on the same balance — no wrapping. Pools pair against the ERC-20 side.
 contract PearpadRouter {
-    uint256 public constant FEE_BPS = 100;
     uint24 public constant POOL_FEE = 10_000;
 
     IERC20 public immutable usdt0;
-    ISwapRouter public immutable swapRouter;
+    ISwapRouter public swapRouter;
     address public treasury;
+    uint256 public bps;
 
-    uint256 public feesOwed; // claimable native USDT0, treasury only
+    uint256 public feesOwed;
 
     event TreasuryChanged(address indexed newTreasury);
+    event BpsChanged(uint256 bps);
+    event AddressSet(bytes32 indexed key, address value);
 
-    constructor(IERC20 usdt0_, ISwapRouter swapRouter_, address treasury_) {
+    modifier onlyTreasury() {
+        require(msg.sender == treasury, "not treasury");
+        _;
+    }
+
+    constructor(IERC20 usdt0_, ISwapRouter swapRouter_, address treasury_, uint256 bps_) {
         usdt0 = usdt0_;
         swapRouter = swapRouter_;
         treasury = treasury_;
+        _setBps(bps_);
     }
 
-    function setTreasury(address newTreasury) external {
-        require(msg.sender == treasury, "not treasury");
+    function _setBps(uint256 bps_) internal {
+        require(bps_ <= 1_000, "bps too high");
+        bps = bps_;
+        emit BpsChanged(bps_);
+    }
+
+    function setBps(uint256 bps_) external onlyTreasury {
+        _setBps(bps_);
+    }
+
+    function setTreasury(address newTreasury) external onlyTreasury {
         require(newTreasury != address(0), "zero treasury");
         treasury = newTreasury;
         emit TreasuryChanged(newTreasury);
     }
 
-    function claimFees() external {
-        require(msg.sender == treasury, "not treasury");
+    function setAddress(bytes32 key, address value) external onlyTreasury {
+        require(value != address(0), "zero address");
+        if (key == "swapRouter") swapRouter = ISwapRouter(value);
+        else revert("bad key");
+        emit AddressSet(key, value);
+    }
+
+    function claimFees() external onlyTreasury {
         uint256 amount = feesOwed;
         feesOwed = 0;
         _send(msg.sender, amount);
     }
 
     function buy(address token, uint256 amountOutMin) external payable returns (uint256 amountOut) {
-        uint256 amountIn = (msg.value - msg.value * FEE_BPS / 10_000) / 1e12; // 6-dec swap size
-        feesOwed += msg.value - amountIn * 1e12; // fee + sub-1e-6 dust, keeps balance == accounting
+        uint256 amountIn = (msg.value - msg.value * bps / 10_000) / 1e12;
+        feesOwed += msg.value - amountIn * 1e12;
 
         usdt0.approve(address(swapRouter), amountIn);
         amountOut = swapRouter.exactInputSingle(
@@ -79,7 +112,6 @@ contract PearpadRouter {
         IERC20(token).transferFrom(msg.sender, address(this), amountIn);
         IERC20(token).approve(address(swapRouter), amountIn);
 
-        // USDT0 received as ERC-20 credits this contract's native balance — payable straight out
         uint256 usdtOut = swapRouter.exactInputSingle(
             ISwapRouter.ExactInputSingleParams({
                 tokenIn: token,
@@ -93,10 +125,9 @@ contract PearpadRouter {
         );
 
         uint256 grossOut = usdtOut * 1e12;
-        uint256 fee = grossOut * FEE_BPS / 10_000;
-        ethOut = grossOut - fee;
+        ethOut = grossOut - grossOut * bps / 10_000;
         require(ethOut >= amountOutMin, "slippage");
-        feesOwed += fee;
+        feesOwed += grossOut - ethOut;
         _send(msg.sender, ethOut);
     }
 

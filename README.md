@@ -21,9 +21,9 @@ All live on chain 988 and verified on [Stablescan](https://stablescan.xyz).
 
 | Contract | Address |
 |---|---|
-| PearpadFactory | `0xF2fe7D1eC701f69aEc294CA625d8520D4C2340c4` |
-| PearpadLocker  | `0x9158045B28b72700D2E9652F0A7952d88C7294cD` |
-| PearpadRouter  | `0xf403be0A82d6400E5cb018A89FDeC6201AF02d98` |
+| PearpadFactory | `0xF4c08fAdc70DD505d9BF2172eC657c5312E265b7` |
+| PearpadLocker  | `0x3A10BA9A0494809d4B2Db14654F12a2F4C10D446` |
+| PearpadRouter  | `0xE0E523eb9D671c2bC9F24cde5168d35504C9A892` |
 
 `PearpadToken` is deployed per launch by the factory.
 

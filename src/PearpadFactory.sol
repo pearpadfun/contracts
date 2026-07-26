@@ -1,14 +1,27 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
-//                       ▄▄
-//                      ▐██▌
-//                  ▄████████▄
-//                ▄███▀    ▀███▄
-//               ▐███      ███▌
-//               ▐███▄    ▄███▌
-//                ▀████▄▄▄▄████▀
-//                  ▀▀██████▀▀
+//                             ▄████
+//                            ▄████
+//                            ███▀
+//                            ██
+//                 ▄█████████▄
+//               ▄█████████████▄
+//               ███████████████
+//               ███████████████
+//              ▄██████████████▀
+//             ▄██████████████
+//           ▄████████████████
+//          ▄█████████████████
+//         ▄██████████████████▄
+//         █████████████████████▄▄
+//         ████████████████████████▄▄
+//         ███████████████████████████
+//         ███████████████████████████
+//          █████████████████████████
+//           ▀█████████████████████▀
+//             ▀▀████████████████▀
+//                 ▀▀▀▀▀▀▀▀▀▀▀▀
 //
 //  ██████╗ ███████╗ █████╗ ██████╗ ██████╗  █████╗ ██████╗
 //  ██╔══██╗██╔════╝██╔══██╗██╔══██╗██╔══██╗██╔══██╗██╔══██╗
@@ -17,7 +30,7 @@ pragma solidity ^0.8.24;
 //  ██║     ███████╗██║  ██║██║  ██║██║     ██║  ██║██████╔╝
 //  ╚═╝     ╚══════╝╚═╝  ╚═╝╚═╝  ╚═╝╚═╝     ╚═╝  ╚═╝╚═════╝
 //
-//  pear-v1.0.0 · Stable chain (id 988) · https://pearpad.fun · © 2026 PEARPAD
+//  pear-v2.0.0 · Stable chain (id 988) · https://pearpad.fun · © 2026 PEARPAD
 
 import {PearpadToken} from "./PearpadToken.sol";
 import {PearpadLocker, IPositionManagerCollect} from "./PearpadLocker.sol";
@@ -51,51 +64,58 @@ interface INonfungiblePositionManager {
 }
 
 interface IUniswapV3Pool {
-    function slot0()
-        external
-        view
-        returns (uint160 sqrtPriceX96, int24, uint16, uint16, uint16, uint8, bool);
+    function slot0() external view returns (uint160 sqrtPriceX96, int24, uint16, uint16, uint16, uint8, bool);
 
-    function swap(address recipient, bool zeroForOne, int256 amountSpecified, uint160 sqrtPriceLimitX96, bytes calldata data)
-        external
-        returns (int256 amount0, int256 amount1);
+    function swap(
+        address recipient,
+        bool zeroForOne,
+        int256 amountSpecified,
+        uint160 sqrtPriceLimitX96,
+        bytes calldata data
+    ) external returns (int256 amount0, int256 amount1);
 }
 
-/// @notice Bonding-curve token factory; at TARGET_USDT the curve migrates to Uniswap V3.
 contract PearpadFactory {
-    uint256 public constant TOTAL_SUPPLY = 1_000_000_000 ether;
-    uint256 public constant CURVE_SUPPLY = 800_000_000 ether; // rest seeds the LP
-    uint256 public constant VIRTUAL_USDT = 2500 ether; // native USDT0, 18 decimals
-    uint256 public constant TARGET_USDT = 10_000 ether; // 1:4 ratio vs virtual reserve
-
-    uint256 public constant FEE_BPS = 100; // split 60/40 creator/treasury
-    uint256 public constant PROTOCOL_FEE_BPS = 30; // treasury only; total curve fee = 1.3%
-    uint256 public constant CREATOR_SHARE_BPS = 6000;
-
-    uint24 public constant POOL_FEE = 10_000; // 1% tier — every pool swap pays the locked LP
-    int24 internal constant MIN_TICK = -887200; // full range at tick spacing 200
+    uint24 public constant POOL_FEE = 10_000;
+    int24 internal constant MIN_TICK = -887200;
     int24 internal constant MAX_TICK = 887200;
 
-    IERC20 public immutable usdt0; // dual-role: this contract's native balance IS its USDT0 ERC-20 balance (6 dec)
-    INonfungiblePositionManager public immutable positionManager;
-    PearpadLocker public immutable lpLocker;
-
-    address public treasury;
+    struct Config {
+        uint128 virtualUsdt;
+        uint128 targetUsdt;
+        uint128 totalSupply;
+        uint128 virtualTokens;
+        uint16 creatorBps;
+        uint16 treasuryBps;
+        uint16 lpCreatorBps;
+    }
 
     struct Curve {
-        uint256 ethReserve; // real native USDT0 (18 dec) only, virtual excluded
+        uint256 ethReserve;
         uint256 tokenReserve;
         address creator;
         bool migrated;
+        Config cfg;
     }
 
-    mapping(address => Curve) public curves;
-    mapping(address => uint256) public feesOwed; // claimable native USDT0
-    uint256 public launchFee;
-    bool public paused; // blocks new launches only; trading is never paused
-    address private expectedPool; // nonzero only during the migration correction swap
+    IERC20 public immutable usdt0;
 
-    event Launched(address indexed token, address indexed creator, string metadata);
+    INonfungiblePositionManager public positionManager;
+    address public swapRouter;
+    PearpadLocker public lpLocker;
+
+    address public treasury;
+
+    Config public defaultConfig;
+
+    mapping(address => Curve) public curves;
+    mapping(address => uint256) public feesOwed;
+    uint256 public launchFee;
+    bool public paused;
+
+    address private expectedPool;
+
+    event Launched(address indexed token, address indexed creator, string metadata, Config cfg);
     event Bought(
         address indexed token,
         address indexed buyer,
@@ -117,14 +137,52 @@ contract PearpadFactory {
     event PausedSet(bool paused);
     event Migrated(address indexed token, address pool, uint256 tokenId);
     event CreatorChanged(address indexed token, address indexed newCreator);
+    event DefaultConfigChanged(Config cfg);
+    event AddressSet(bytes32 indexed key, address value);
 
-    constructor(IERC20 usdt0_, INonfungiblePositionManager positionManager_, ISwapRouter swapRouter_, address treasury_)
-    {
+    modifier onlyTreasury() {
+        require(msg.sender == treasury, "not treasury");
+        _;
+    }
+
+    constructor(
+        IERC20 usdt0_,
+        INonfungiblePositionManager positionManager_,
+        ISwapRouter swapRouter_,
+        address treasury_,
+        Config memory cfg
+    ) {
         usdt0 = usdt0_;
         positionManager = positionManager_;
+        swapRouter = address(swapRouter_);
         treasury = treasury_;
-        lpLocker =
-            new PearpadLocker(IPositionManagerCollect(address(positionManager_)), swapRouter_, address(usdt0_), treasury_);
+        _setDefaultConfig(cfg);
+        lpLocker = new PearpadLocker(
+            IPositionManagerCollect(address(positionManager_)), swapRouter_, address(usdt0_), treasury_
+        );
+    }
+
+    function _setDefaultConfig(Config memory cfg) internal {
+        require(cfg.virtualUsdt > 0 && cfg.targetUsdt > 0, "zero curve");
+        require(cfg.virtualTokens > 0 && cfg.totalSupply > 0, "bad supply");
+        uint256 left = uint256(cfg.virtualTokens) * cfg.virtualUsdt / (uint256(cfg.virtualUsdt) + cfg.targetUsdt);
+        require(uint256(cfg.virtualTokens) - left <= cfg.totalSupply, "supply too low");
+        require(cfg.lpCreatorBps <= 10_000, "bad share");
+        require(uint256(cfg.targetUsdt) % 1e12 == 0, "target not 1e12-divisible");
+        defaultConfig = cfg;
+        emit DefaultConfigChanged(cfg);
+    }
+
+    function setDefaultConfig(Config calldata cfg) external onlyTreasury {
+        _setDefaultConfig(cfg);
+    }
+
+    function configOf(address token) external view returns (Config memory) {
+        return curves[token].cfg;
+    }
+
+    function creatorShareOf(address token) external view returns (uint16) {
+        return curves[token].cfg.lpCreatorBps;
     }
 
     function creatorOf(address token) external view returns (address) {
@@ -140,7 +198,31 @@ contract PearpadFactory {
         emit CreatorChanged(token, newCreator);
     }
 
-    // value beyond launchFee executes the creator's first buy atomically
+    function setTreasury(address newTreasury) external onlyTreasury {
+        require(newTreasury != address(0), "zero treasury");
+        treasury = newTreasury;
+        emit TreasuryChanged(newTreasury);
+    }
+
+    function setPaused(bool paused_) external onlyTreasury {
+        paused = paused_;
+        emit PausedSet(paused_);
+    }
+
+    function setLaunchFee(uint256 newFee) external onlyTreasury {
+        launchFee = newFee;
+        emit LaunchFeeChanged(newFee);
+    }
+
+    function setAddress(bytes32 key, address value) external onlyTreasury {
+        require(value != address(0), "zero address");
+        if (key == "positionManager") positionManager = INonfungiblePositionManager(value);
+        else if (key == "swapRouter") swapRouter = value;
+        else if (key == "lpLocker") lpLocker = PearpadLocker(value);
+        else revert("bad key");
+        emit AddressSet(key, value);
+    }
+
     function launch(string calldata name, string calldata symbol, string calldata metadata, uint256 maxFee)
         external
         payable
@@ -151,39 +233,25 @@ contract PearpadFactory {
         require(msg.value >= launchFee, "insufficient fee");
         feesOwed[treasury] += launchFee;
 
-        token = address(new PearpadToken(name, symbol, metadata, msg.sender, TOTAL_SUPPLY));
-        curves[token] = Curve({ethReserve: 0, tokenReserve: CURVE_SUPPLY, creator: msg.sender, migrated: false});
-        emit Launched(token, msg.sender, metadata);
+        Config memory cfg = defaultConfig;
+        token = address(new PearpadToken(name, symbol, metadata, msg.sender, cfg.totalSupply));
+        Curve storage c = curves[token];
+        c.tokenReserve = cfg.virtualTokens;
+        c.creator = msg.sender;
+        c.cfg = cfg;
+        emit Launched(token, msg.sender, metadata, cfg);
 
         uint256 devBuy = msg.value - launchFee;
-        if (devBuy > 0) _buy(token, curves[token], devBuy, 0);
-    }
-
-    function setTreasury(address newTreasury) external {
-        require(msg.sender == treasury, "not treasury");
-        require(newTreasury != address(0), "zero treasury");
-        treasury = newTreasury;
-        emit TreasuryChanged(newTreasury);
-    }
-
-    // blocks new launches only; trading is never paused
-    function setPaused(bool paused_) external {
-        require(msg.sender == treasury, "not treasury");
-        paused = paused_;
-        emit PausedSet(paused_);
-    }
-
-    function setLaunchFee(uint256 newFee) external {
-        require(msg.sender == treasury, "not treasury");
-        launchFee = newFee;
-        emit LaunchFeeChanged(newFee);
+        if (devBuy > 0) _buy(token, c, devBuy, 0);
     }
 
     function _takeFee(Curve storage c, uint256 grossEth) internal returns (uint256 fee) {
-        fee = grossEth * (FEE_BPS + PROTOCOL_FEE_BPS) / 10_000;
-        uint256 creatorCut = grossEth * FEE_BPS * CREATOR_SHARE_BPS / 100_000_000;
+        Config storage cfg = c.cfg;
+        uint256 creatorCut = grossEth * cfg.creatorBps / 10_000;
+        uint256 treasuryCut = grossEth * cfg.treasuryBps / 10_000;
         feesOwed[c.creator] += creatorCut;
-        feesOwed[treasury] += fee - creatorCut;
+        feesOwed[treasury] += treasuryCut;
+        fee = creatorCut + treasuryCut;
     }
 
     function claimFees() external {
@@ -193,23 +261,19 @@ contract PearpadFactory {
         require(ok, "claim failed");
     }
 
-    // Pricing: constant product over (VIRTUAL_USDT + ethReserve, tokenReserve).
-
-    // Rounds up: both quotes subtract this from a reserve, so flooring would round the payout up
-    // and a full exit could quote 1 wei more than the reserve holds.
     function _divUp(uint256 a, uint256 b) internal pure returns (uint256) {
         return (a + b - 1) / b;
     }
 
     function getTokensOut(address token, uint256 ethIn) public view returns (uint256) {
         Curve storage c = curves[token];
-        uint256 e = VIRTUAL_USDT + c.ethReserve;
+        uint256 e = c.cfg.virtualUsdt + c.ethReserve;
         return c.tokenReserve - _divUp(e * c.tokenReserve, e + ethIn);
     }
 
     function getEthOut(address token, uint256 tokensIn) public view returns (uint256) {
         Curve storage c = curves[token];
-        uint256 e = VIRTUAL_USDT + c.ethReserve;
+        uint256 e = c.cfg.virtualUsdt + c.ethReserve;
         return e - _divUp(e * c.tokenReserve, c.tokenReserve + tokensIn);
     }
 
@@ -223,11 +287,12 @@ contract PearpadFactory {
     {
         require(c.tokenReserve > 0 && !c.migrated, "not tradeable");
         require(value > 0, "zero eth");
+        Config storage cfg = c.cfg;
+        uint256 target = cfg.targetUsdt;
 
-        uint256 ethIn = value * 10_000 / (10_000 + FEE_BPS + PROTOCOL_FEE_BPS);
-        // cap at the migration target, refund the rest
-        if (c.ethReserve + ethIn > TARGET_USDT) {
-            ethIn = TARGET_USDT - c.ethReserve;
+        uint256 ethIn = value * 10_000 / (10_000 + uint256(cfg.creatorBps) + cfg.treasuryBps);
+        if (c.ethReserve + ethIn > target) {
+            ethIn = target - c.ethReserve;
         }
         uint256 fee = _takeFee(c, ethIn);
         uint256 refund = value - ethIn - fee;
@@ -240,7 +305,7 @@ contract PearpadFactory {
         IERC20(token).transfer(msg.sender, tokensOut);
         emit Bought(token, msg.sender, ethIn, tokensOut, c.ethReserve, c.tokenReserve);
 
-        if (c.ethReserve == TARGET_USDT) _migrate(token, c);
+        if (c.ethReserve == target) _migrate(token, c);
         if (refund > 0) {
             (bool ok,) = msg.sender.call{value: refund}("");
             require(ok, "refund failed");
@@ -265,28 +330,30 @@ contract PearpadFactory {
     function _migrate(address token, Curve storage c) internal {
         c.migrated = true;
 
-        // no wrapping on Stable: the native reserve is already spendable as USDT0 ERC-20, 6 decimals
         uint256 usdtAmount = c.ethReserve / 1e12;
-        // unsold curve remainder plus the LP reserve all goes to the pool
         uint256 tokenAmount = IERC20(token).balanceOf(address(this));
 
         (address token0, address token1) = token < address(usdt0) ? (token, address(usdt0)) : (address(usdt0), token);
-        (uint256 amount0, uint256 amount1) =
-            token0 == token ? (tokenAmount, usdtAmount) : (usdtAmount, tokenAmount);
+        (uint256 amount0, uint256 amount1) = token0 == token ? (tokenAmount, usdtAmount) : (usdtAmount, tokenAmount);
 
-        // sqrtPriceX96 = sqrt(amount1/amount0) * 2^96; 1e36 scale keeps precision across the 6/18-dec gap
         uint160 sqrtPriceX96 = uint160((_sqrt(amount1 * 1e36 / amount0) * (2 ** 96)) / 1e18);
 
         address pool = positionManager.createAndInitializePoolIfNecessary(token0, token1, POOL_FEE, sqrtPriceX96);
 
-        // corrects a pre-initialized pool back to the curve price before minting
         (amount0, amount1) = _correctPool(pool, sqrtPriceX96, amount0, amount1, abi.encode(token0, token1));
-        (tokenAmount, usdtAmount) = token0 == token ? (amount0, amount1) : (amount1, amount0);
 
-        IERC20(token).approve(address(positionManager), tokenAmount);
-        usdt0.approve(address(positionManager), usdtAmount);
+        uint256 tokenId = _mintLocked(token, token0, token1, amount0, amount1);
+        emit Migrated(token, pool, tokenId);
+    }
 
-        (uint256 tokenId,,,) = positionManager.mint(
+    function _mintLocked(address token, address token0, address token1, uint256 amount0, uint256 amount1)
+        internal
+        returns (uint256 tokenId)
+    {
+        IERC20(token).approve(address(positionManager), token0 == token ? amount0 : amount1);
+        usdt0.approve(address(positionManager), token0 == token ? amount1 : amount0);
+
+        (tokenId,,,) = positionManager.mint(
             INonfungiblePositionManager.MintParams({
                 token0: token0,
                 token1: token1,
@@ -302,13 +369,10 @@ contract PearpadFactory {
             })
         );
 
-        usdt0.approve(address(positionManager), 0); // never leave a live USDT0 allowance
+        usdt0.approve(address(positionManager), 0);
         lpLocker.register(tokenId, token);
-        emit Migrated(token, pool, tokenId);
     }
 
-    // Swaps a pre-initialized pool to our price, then reports what we still hold. Uses the swap's
-    // own deltas, not balanceOf: this contract's USDT0 balance is shared across every migration.
     function _correctPool(address pool, uint160 target, uint256 amount0, uint256 amount1, bytes memory data)
         internal
         returns (uint256, uint256)

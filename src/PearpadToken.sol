@@ -1,14 +1,27 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
-//                       ▄▄
-//                      ▐██▌
-//                  ▄████████▄
-//                ▄███▀    ▀███▄
-//               ▐███      ███▌
-//               ▐███▄    ▄███▌
-//                ▀████▄▄▄▄████▀
-//                  ▀▀██████▀▀
+//                             ▄████
+//                            ▄████
+//                            ███▀
+//                            ██
+//                 ▄█████████▄
+//               ▄█████████████▄
+//               ███████████████
+//               ███████████████
+//              ▄██████████████▀
+//             ▄██████████████
+//           ▄████████████████
+//          ▄█████████████████
+//         ▄██████████████████▄
+//         █████████████████████▄▄
+//         ████████████████████████▄▄
+//         ███████████████████████████
+//         ███████████████████████████
+//          █████████████████████████
+//           ▀█████████████████████▀
+//             ▀▀████████████████▀
+//                 ▀▀▀▀▀▀▀▀▀▀▀▀
 //
 //  ██████╗ ███████╗ █████╗ ██████╗ ██████╗  █████╗ ██████╗
 //  ██╔══██╗██╔════╝██╔══██╗██╔══██╗██╔══██╗██╔══██╗██╔══██╗
@@ -17,20 +30,18 @@ pragma solidity ^0.8.24;
 //  ██║     ███████╗██║  ██║██║  ██║██║     ██║  ██║██████╔╝
 //  ╚═╝     ╚══════╝╚═╝  ╚═╝╚═╝  ╚═╝╚═╝     ╚═╝  ╚═╝╚═════╝
 //
-//  pear-v1.0.0 · Stable chain (id 988) · https://pearpad.fun · © 2026 PEARPAD
+//  pear-v2.0.0 · Stable chain (id 988) · https://pearpad.fun · © 2026 PEARPAD
 
 import {ERC20} from "openzeppelin-contracts/contracts/token/ERC20/ERC20.sol";
 import {ERC20Burnable} from "openzeppelin-contracts/contracts/token/ERC20/extensions/ERC20Burnable.sol";
 
-/// @notice Fixed-supply ERC20. No mint, no hooks, no owner.
 contract PearpadToken is ERC20, ERC20Burnable {
-    // Ownable-shaped so explorers show ownership as renounced
     event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
 
     address public immutable platform;
-    address public immutable creator; // record only; fee rights live on the factory
+    address public immutable creator;
 
-    string public metadata; // ipfs://<cid>
+    string public metadata;
 
     constructor(string memory name_, string memory symbol_, string memory metadata_, address creator_, uint256 supply)
         ERC20(name_, symbol_)
