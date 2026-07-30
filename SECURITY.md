@@ -34,9 +34,9 @@ In scope — the deployed V2 contracts and this source:
 
 | Contract | Address |
 |---|---|
-| PearpadFactory | `0xF4c08fAdc70DD505d9BF2172eC657c5312E265b7` |
-| PearpadLocker  | `0x3A10BA9A0494809d4B2Db14654F12a2F4C10D446` |
-| PearpadRouter  | `0xE0E523eb9D671c2bC9F24cde5168d35504C9A892` |
+| PearpadFactory | `0x341d613Cd110c602713E23cFE8826Aed54fa026F` |
+| PearpadLocker  | `0xb3a22d7d9617fF151415E228Ce10d5D42D0fc5Ee` |
+| PearpadRouter  | `0x19b824Bf30424f89D9d8BEC940232234fE79226A` |
 
 Plus every `PearpadToken` the factory deploys. All are verified on
 [Stablescan](https://stablescan.xyz) — check the verified source before

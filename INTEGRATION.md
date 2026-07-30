@@ -6,9 +6,9 @@ For agents implementing buy/sell against Pearpad on **Stable mainnet (chain id 9
 
 | Contract | Address | Role |
 |---|---|---|
-| PearpadFactory | `0xF4c08fAdc70DD505d9BF2172eC657c5312E265b7` | Launches tokens, bonding-curve trading pre-migration |
-| PearpadRouter | `0xE0E523eb9D671c2bC9F24cde5168d35504C9A892` | Swaps post-migration (wraps Uniswap V3 + 1% fee) |
-| PearpadLocker | `0x3A10BA9A0494809d4B2Db14654F12a2F4C10D446` | Holds locked LP; not needed for swapping |
+| PearpadFactory | `0x341d613Cd110c602713E23cFE8826Aed54fa026F` | Launches tokens, bonding-curve trading pre-migration |
+| PearpadRouter | `0x19b824Bf30424f89D9d8BEC940232234fE79226A` | Swaps post-migration (wraps Uniswap V3 + 1% fee) |
+| PearpadLocker | `0xb3a22d7d9617fF151415E228Ce10d5D42D0fc5Ee` | Holds locked LP; not needed for swapping |
 | USDT0 | `0x779Ded0c9e1022225f8E0630b35a9b54bE713736` | Dual-role: native gas token (18 dec) AND ERC-20 (6 dec) on the same balance |
 
 ABIs: inlined at the bottom of this file (plain arrays, ready for viem/ethers).
@@ -47,7 +47,7 @@ sell(address token, uint256 tokensIn, uint256 minEthOut) → uint256 ethOut  // 
 - `sell` payout for UI: `gross = getEthOut(token, tokensIn)`, user receives `gross - gross*bps/10000`.
 - Buys that would push the reserve past the token's target are capped and the excess refunded; a buy that lands exactly on target triggers migration in the same tx (more gas — don't set tight gas limits).
 - Events for indexing: `Launched(token, creator, metadata, cfg)`, `Bought(token, buyer, ethIn, tokensOut, ethReserve, tokenReserve)`, `Sold(...)`, `Migrated`.
-- Launching: `launch(name, symbol, metadata, maxFee)` payable — always read `launchFee()` (currently 0, may change; pass it as `maxFee` guard). Any value beyond the fee executes the creator's first buy atomically.
+- Launching: `launch(name, symbol, metadata, maxFee)` payable — always read `launchFee()` (may change at any time; pass it as `maxFee` guard). Any value beyond the fee executes the creator's first buy atomically.
 
 ## Phase 2 — migrated (Router)
 
@@ -93,8 +93,8 @@ export const stable = defineChain({
   rpcUrls: { default: { http: ['https://rpc.stable.xyz'] } },
 })
 
-const FACTORY = '0xF4c08fAdc70DD505d9BF2172eC657c5312E265b7'
-const ROUTER  = '0xE0E523eb9D671c2bC9F24cde5168d35504C9A892'
+const FACTORY = '0x341d613Cd110c602713E23cFE8826Aed54fa026F'
+const ROUTER  = '0x19b824Bf30424f89D9d8BEC940232234fE79226A'
 
 const pub = createPublicClient({ chain: stable, transport: http() })
 const wallet = createWalletClient({ chain: stable, transport: custom(window.ethereum) })
