@@ -30,12 +30,15 @@ pragma solidity ^0.8.24;
 //  ██║     ███████╗██║  ██║██║  ██║██║     ██║  ██║██████╔╝
 //  ╚═╝     ╚══════╝╚═╝  ╚═╝╚═╝  ╚═╝╚═╝     ╚═╝  ╚═╝╚═════╝
 //
-//  pear-v2.0.0 · Stable chain (id 988) · https://pearpad.fun · © 2026 PEARPAD
+//  pear-v3.0.0 · Stable chain (id 988) · https://pearpad.fun · © 2026 PEARPAD
 
 import {IERC20} from "openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
+import {SafeERC20} from "openzeppelin-contracts/contracts/token/ERC20/utils/SafeERC20.sol";
 import {ISwapRouter} from "./PearpadLocker.sol";
 
 contract PearpadRouter {
+    using SafeERC20 for IERC20;
+
     uint24 public constant POOL_FEE = 10_000;
 
     IERC20 public immutable usdt0;
@@ -55,6 +58,7 @@ contract PearpadRouter {
     }
 
     constructor(IERC20 usdt0_, ISwapRouter swapRouter_, address treasury_, uint256 bps_) {
+        require(treasury_ != address(0), "zero treasury");
         usdt0 = usdt0_;
         swapRouter = swapRouter_;
         treasury = treasury_;
@@ -94,7 +98,7 @@ contract PearpadRouter {
         uint256 amountIn = (msg.value - msg.value * bps / 10_000) / 1e12;
         feesOwed += msg.value - amountIn * 1e12;
 
-        usdt0.approve(address(swapRouter), amountIn);
+        usdt0.forceApprove(address(swapRouter), amountIn);
         amountOut = swapRouter.exactInputSingle(
             ISwapRouter.ExactInputSingleParams({
                 tokenIn: address(usdt0),
@@ -109,8 +113,8 @@ contract PearpadRouter {
     }
 
     function sell(address token, uint256 amountIn, uint256 amountOutMin) external returns (uint256 ethOut) {
-        IERC20(token).transferFrom(msg.sender, address(this), amountIn);
-        IERC20(token).approve(address(swapRouter), amountIn);
+        IERC20(token).safeTransferFrom(msg.sender, address(this), amountIn);
+        IERC20(token).forceApprove(address(swapRouter), amountIn);
 
         uint256 usdtOut = swapRouter.exactInputSingle(
             ISwapRouter.ExactInputSingleParams({

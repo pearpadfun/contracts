@@ -27,6 +27,11 @@ All live on chain 988 and verified on [Stablescan](https://stablescan.xyz).
 
 `PearpadToken` is deployed per launch by the factory.
 
+> **Source vs chain.** `src/` here tracks the next release and is ahead of the
+> bytecode at the addresses above, which still run the previous version. Verify
+> against Stablescan before assuming a function in this repo exists on chain; this
+> note comes down when the redeploy lands.
+
 ## Contracts
 
 - **PearpadFactory**: launches tokens, runs the bonding curve, migrates to Uniswap v3 at target.

@@ -30,9 +30,10 @@ pragma solidity ^0.8.24;
 //  ██║     ███████╗██║  ██║██║  ██║██║     ██║  ██║██████╔╝
 //  ╚═╝     ╚══════╝╚═╝  ╚═╝╚═╝  ╚═╝╚═╝     ╚═╝  ╚═╝╚═════╝
 //
-//  pear-v2.0.0 · Stable chain (id 988) · https://pearpad.fun · © 2026 PEARPAD
+//  pear-v3.0.0 · Stable chain (id 988) · https://pearpad.fun · © 2026 PEARPAD
 
 import {IERC20} from "openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
+import {SafeERC20} from "openzeppelin-contracts/contracts/token/ERC20/utils/SafeERC20.sol";
 
 interface ISwapRouter {
     struct ExactInputSingleParams {
@@ -65,7 +66,7 @@ interface IPositionManagerCollect {
 }
 
 contract PearpadLocker {
-    uint24 public constant POOL_FEE = 10_000;
+    using SafeERC20 for IERC20;
 
     struct Position {
         address token;
@@ -83,6 +84,7 @@ contract PearpadLocker {
 
     event TreasuryChanged(address indexed newTreasury);
     event Registered(uint256 indexed tokenId, address indexed token);
+    event Collected(uint256 indexed tokenId, address indexed token, address caller, uint256 usdtOut, uint256 creatorCut);
     event AddressSet(bytes32 indexed key, address value);
 
     modifier onlyTreasury() {
@@ -90,7 +92,10 @@ contract PearpadLocker {
         _;
     }
 
+    uint24 public constant POOL_FEE = 10_000;
+
     constructor(IPositionManagerCollect positionManager_, ISwapRouter swapRouter_, address usdt0_, address treasury_) {
+        require(usdt0_ != address(0) && treasury_ != address(0), "zero address");
         positionManager = positionManager_;
         swapRouter = swapRouter_;
         usdt0 = usdt0_;
@@ -120,46 +125,42 @@ contract PearpadLocker {
         emit Registered(tokenId, token);
     }
 
-    function collect(uint256 tokenId, uint256 minUsdtOut) external returns (uint256 usdtAmount, uint256 tokenAmount) {
+    function collect(uint256 tokenId) external returns (uint256 usdtAmount) {
         Position memory p = positions[tokenId];
         require(p.token != address(0), "unknown position");
         address token = p.token;
         address creator = ICreatorLookup(factory).creatorOf(token);
         require(creator != address(0), "no creator");
-        require(msg.sender == creator || msg.sender == treasury, "not authorized");
 
         (uint256 amount0, uint256 amount1) = positionManager.collect(
             IPositionManagerCollect.CollectParams({
                 tokenId: tokenId, recipient: address(this), amount0Max: type(uint128).max, amount1Max: type(uint128).max
             })
         );
+        uint256 tokenAmount;
         (usdtAmount, tokenAmount) = token < usdt0 ? (amount1, amount0) : (amount0, amount1);
 
-        uint256 creatorUsdt = usdtAmount * p.creatorShareBps / 10_000;
-        uint256 creatorToken = tokenAmount * p.creatorShareBps / 10_000;
-        if (creatorUsdt > 0) IERC20(usdt0).transfer(creator, creatorUsdt);
-        if (creatorToken > 0) IERC20(token).transfer(creator, creatorToken);
-
-        uint256 treasuryUsdt = usdtAmount - creatorUsdt;
-        if (treasuryUsdt > 0) IERC20(usdt0).transfer(treasury, treasuryUsdt);
-
-        if (msg.sender == treasury) {
-            uint256 treasuryToken = IERC20(token).balanceOf(address(this));
-            if (treasuryToken > 0) {
-                IERC20(token).approve(address(swapRouter), treasuryToken);
-                swapRouter.exactInputSingle(
-                    ISwapRouter.ExactInputSingleParams({
-                        tokenIn: token,
-                        tokenOut: usdt0,
-                        fee: POOL_FEE,
-                        recipient: treasury,
-                        amountIn: treasuryToken,
-                        amountOutMinimum: minUsdtOut,
-                        sqrtPriceLimitX96: 0
-                    })
-                );
-            }
+        if (tokenAmount > 0) {
+            IERC20(token).forceApprove(address(swapRouter), tokenAmount);
+            usdtAmount += swapRouter.exactInputSingle(
+                ISwapRouter.ExactInputSingleParams({
+                    tokenIn: token,
+                    tokenOut: usdt0,
+                    fee: POOL_FEE,
+                    recipient: address(this),
+                    amountIn: tokenAmount,
+                    amountOutMinimum: 0,
+                    sqrtPriceLimitX96: 0
+                })
+            );
+            IERC20(token).forceApprove(address(swapRouter), 0);
         }
+
+        uint256 creatorUsdt = usdtAmount * p.creatorShareBps / 10_000;
+        if (creatorUsdt > 0) IERC20(usdt0).safeTransfer(creator, creatorUsdt);
+        uint256 treasuryUsdt = usdtAmount - creatorUsdt;
+        if (treasuryUsdt > 0) IERC20(usdt0).safeTransfer(treasury, treasuryUsdt);
+        emit Collected(tokenId, token, msg.sender, usdtAmount, creatorUsdt);
     }
 
     function onERC721Received(address, address, uint256, bytes calldata) external pure returns (bytes4) {

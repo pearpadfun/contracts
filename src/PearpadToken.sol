@@ -30,7 +30,7 @@ pragma solidity ^0.8.24;
 //  ██║     ███████╗██║  ██║██║  ██║██║     ██║  ██║██████╔╝
 //  ╚═╝     ╚══════╝╚═╝  ╚═╝╚═╝  ╚═╝╚═╝     ╚═╝  ╚═╝╚═════╝
 //
-//  pear-v2.0.0 · Stable chain (id 988) · https://pearpad.fun · © 2026 PEARPAD
+//  pear-v3.0.0 · Stable chain (id 988) · https://pearpad.fun · © 2026 PEARPAD
 
 import {ERC20} from "openzeppelin-contracts/contracts/token/ERC20/ERC20.sol";
 import {ERC20Burnable} from "openzeppelin-contracts/contracts/token/ERC20/extensions/ERC20Burnable.sol";
@@ -46,6 +46,7 @@ contract PearpadToken is ERC20, ERC20Burnable {
     constructor(string memory name_, string memory symbol_, string memory metadata_, address creator_, uint256 supply)
         ERC20(name_, symbol_)
     {
+        require(creator_ != address(0), "zero creator");
         platform = msg.sender;
         creator = creator_;
         metadata = metadata_;

@@ -30,12 +30,14 @@ pragma solidity ^0.8.24;
 //  ██║     ███████╗██║  ██║██║  ██║██║     ██║  ██║██████╔╝
 //  ╚═╝     ╚══════╝╚═╝  ╚═╝╚═╝  ╚═╝╚═╝     ╚═╝  ╚═╝╚═════╝
 //
-//  pear-v2.0.0 · Stable chain (id 988) · https://pearpad.fun · © 2026 PEARPAD
+//  pear-v3.0.0 · Stable chain (id 988) · https://pearpad.fun · © 2026 PEARPAD
 
 import {PearpadToken} from "./PearpadToken.sol";
 import {PearpadLocker, IPositionManagerCollect} from "./PearpadLocker.sol";
 import {ISwapRouter} from "./PearpadLocker.sol";
 import {IERC20} from "openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
+import {SafeERC20} from "openzeppelin-contracts/contracts/token/ERC20/utils/SafeERC20.sol";
+import {Math} from "openzeppelin-contracts/contracts/utils/math/Math.sol";
 
 interface INonfungiblePositionManager {
     struct MintParams {
@@ -76,7 +78,10 @@ interface IUniswapV3Pool {
 }
 
 contract PearpadFactory {
+    using SafeERC20 for IERC20;
+
     uint24 public constant POOL_FEE = 10_000;
+    uint256 public constant TUNING_TOLERANCE_BPS = 10;
     int24 internal constant MIN_TICK = -887200;
     int24 internal constant MAX_TICK = 887200;
 
@@ -152,6 +157,7 @@ contract PearpadFactory {
         address treasury_,
         Config memory cfg
     ) {
+        require(treasury_ != address(0), "zero treasury");
         usdt0 = usdt0_;
         positionManager = positionManager_;
         swapRouter = address(swapRouter_);
@@ -167,6 +173,8 @@ contract PearpadFactory {
         require(cfg.virtualTokens > 0 && cfg.totalSupply > 0, "bad supply");
         uint256 left = uint256(cfg.virtualTokens) * cfg.virtualUsdt / (uint256(cfg.virtualUsdt) + cfg.targetUsdt);
         require(uint256(cfg.virtualTokens) - left <= cfg.totalSupply, "supply too low");
+
+        require(_isTuned(cfg), "virtualTokens untuned");
         require(cfg.lpCreatorBps <= 10_000, "bad share");
         require(uint256(cfg.targetUsdt) % 1e12 == 0, "target not 1e12-divisible");
         defaultConfig = cfg;
@@ -175,6 +183,21 @@ contract PearpadFactory {
 
     function setDefaultConfig(Config calldata cfg) external onlyTreasury {
         _setDefaultConfig(cfg);
+    }
+
+    function tunedVirtualTokens(uint256 virtualUsdt_, uint256 targetUsdt_, uint256 totalSupply_)
+        public
+        pure
+        returns (uint256)
+    {
+        uint256 sum = virtualUsdt_ + targetUsdt_;
+        return Math.mulDiv(Math.mulDiv(totalSupply_, sum, targetUsdt_), sum, targetUsdt_ + 2 * virtualUsdt_);
+    }
+
+    function _isTuned(Config memory cfg) internal pure returns (bool) {
+        uint256 tuned = tunedVirtualTokens(cfg.virtualUsdt, cfg.targetUsdt, cfg.totalSupply);
+        uint256 drift = cfg.virtualTokens > tuned ? cfg.virtualTokens - tuned : tuned - cfg.virtualTokens;
+        return drift <= Math.mulDiv(tuned, TUNING_TOLERANCE_BPS, 10_000);
     }
 
     function configOf(address token) external view returns (Config memory) {
@@ -200,6 +223,13 @@ contract PearpadFactory {
 
     function setTreasury(address newTreasury) external onlyTreasury {
         require(newTreasury != address(0), "zero treasury");
+        // the locker keeps its own treasury; rotate it separately or LP fees
+        // keep paying the old address
+        uint256 owed = feesOwed[treasury];
+        if (owed > 0) {
+            feesOwed[treasury] = 0;
+            feesOwed[newTreasury] += owed;
+        }
         treasury = newTreasury;
         emit TreasuryChanged(newTreasury);
     }
@@ -257,7 +287,28 @@ contract PearpadFactory {
     function claimFees() external {
         uint256 amount = feesOwed[msg.sender];
         feesOwed[msg.sender] = 0;
-        (bool ok,) = msg.sender.call{value: amount}("");
+        _sendFees(msg.sender, amount);
+    }
+
+    function collectFees(address token) external {
+        Curve storage c = curves[token];
+        address creator = c.creator;
+        require(creator != address(0), "unknown token");
+        // zero both balances before any external call; sequential so
+        // creator == treasury cannot read the same balance twice
+        uint256 creatorOwed = feesOwed[creator];
+        feesOwed[creator] = 0;
+        address treasury_ = treasury;
+        uint256 treasuryOwed = feesOwed[treasury_];
+        feesOwed[treasury_] = 0;
+        if (c.migrated) lpLocker.collect(lpLocker.positionOf(token));
+        _sendFees(creator, creatorOwed);
+        _sendFees(treasury_, treasuryOwed);
+    }
+
+    function _sendFees(address to, uint256 amount) internal {
+        if (amount == 0) return;
+        (bool ok,) = to.call{value: amount}("");
         require(ok, "claim failed");
     }
 
@@ -302,7 +353,7 @@ contract PearpadFactory {
 
         c.ethReserve += ethIn;
         c.tokenReserve -= tokensOut;
-        IERC20(token).transfer(msg.sender, tokensOut);
+        IERC20(token).safeTransfer(msg.sender, tokensOut);
         emit Bought(token, msg.sender, ethIn, tokensOut, c.ethReserve, c.tokenReserve);
 
         if (c.ethReserve == target) _migrate(token, c);
@@ -321,7 +372,7 @@ contract PearpadFactory {
         c.tokenReserve += tokensIn;
         ethOut = grossOut - _takeFee(c, grossOut);
         require(ethOut >= minEthOut, "slippage");
-        IERC20(token).transferFrom(msg.sender, address(this), tokensIn);
+        IERC20(token).safeTransferFrom(msg.sender, address(this), tokensIn);
         (bool ok,) = msg.sender.call{value: ethOut}("");
         require(ok, "eth send failed");
         emit Sold(token, msg.sender, tokensIn, ethOut, c.ethReserve, c.tokenReserve);
@@ -350,8 +401,8 @@ contract PearpadFactory {
         internal
         returns (uint256 tokenId)
     {
-        IERC20(token).approve(address(positionManager), token0 == token ? amount0 : amount1);
-        usdt0.approve(address(positionManager), token0 == token ? amount1 : amount0);
+        IERC20(token).forceApprove(address(positionManager), token0 == token ? amount0 : amount1);
+        usdt0.forceApprove(address(positionManager), token0 == token ? amount1 : amount0);
 
         (tokenId,,,) = positionManager.mint(
             INonfungiblePositionManager.MintParams({
@@ -369,7 +420,8 @@ contract PearpadFactory {
             })
         );
 
-        usdt0.approve(address(positionManager), 0);
+        IERC20(token).forceApprove(address(positionManager), 0);
+        usdt0.forceApprove(address(positionManager), 0);
         lpLocker.register(tokenId, token);
     }
 
@@ -390,8 +442,8 @@ contract PearpadFactory {
     function uniswapV3SwapCallback(int256 amount0Delta, int256 amount1Delta, bytes calldata data) external {
         require(msg.sender == expectedPool && msg.sender != address(0), "bad callback");
         (address token0, address token1) = abi.decode(data, (address, address));
-        if (amount0Delta > 0) IERC20(token0).transfer(msg.sender, uint256(amount0Delta));
-        if (amount1Delta > 0) IERC20(token1).transfer(msg.sender, uint256(amount1Delta));
+        if (amount0Delta > 0) IERC20(token0).safeTransfer(msg.sender, uint256(amount0Delta));
+        if (amount1Delta > 0) IERC20(token1).safeTransfer(msg.sender, uint256(amount1Delta));
     }
 
     function _sqrt(uint256 x) internal pure returns (uint256 y) {

@@ -46,21 +46,11 @@
         "name": "tokenId",
         "type": "uint256",
         "internalType": "uint256"
-      },
-      {
-        "name": "minUsdtOut",
-        "type": "uint256",
-        "internalType": "uint256"
       }
     ],
     "outputs": [
       {
         "name": "usdtAmount",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "tokenAmount",
         "type": "uint256",
         "internalType": "uint256"
       }
@@ -279,6 +269,43 @@
   },
   {
     "type": "event",
+    "name": "Collected",
+    "inputs": [
+      {
+        "name": "tokenId",
+        "type": "uint256",
+        "indexed": true,
+        "internalType": "uint256"
+      },
+      {
+        "name": "token",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "caller",
+        "type": "address",
+        "indexed": false,
+        "internalType": "address"
+      },
+      {
+        "name": "usdtOut",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "creatorCut",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
     "name": "Registered",
     "inputs": [
       {
@@ -308,5 +335,16 @@
       }
     ],
     "anonymous": false
+  },
+  {
+    "type": "error",
+    "name": "SafeERC20FailedOperation",
+    "inputs": [
+      {
+        "name": "token",
+        "type": "address",
+        "internalType": "address"
+      }
+    ]
   }
 ]
