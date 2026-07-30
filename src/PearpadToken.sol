@@ -36,6 +36,8 @@ import {ERC20} from "openzeppelin-contracts/contracts/token/ERC20/ERC20.sol";
 import {ERC20Burnable} from "openzeppelin-contracts/contracts/token/ERC20/extensions/ERC20Burnable.sol";
 
 contract PearpadToken is ERC20, ERC20Burnable {
+    string public constant VERSION = "pear-v3";
+
     event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
 
     address public immutable platform;

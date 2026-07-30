@@ -223,8 +223,6 @@ contract PearpadFactory {
 
     function setTreasury(address newTreasury) external onlyTreasury {
         require(newTreasury != address(0), "zero treasury");
-        // the locker keeps its own treasury; rotate it separately or LP fees
-        // keep paying the old address
         uint256 owed = feesOwed[treasury];
         if (owed > 0) {
             feesOwed[treasury] = 0;
@@ -294,8 +292,6 @@ contract PearpadFactory {
         Curve storage c = curves[token];
         address creator = c.creator;
         require(creator != address(0), "unknown token");
-        // zero both balances before any external call; sequential so
-        // creator == treasury cannot read the same balance twice
         uint256 creatorOwed = feesOwed[creator];
         feesOwed[creator] = 0;
         address treasury_ = treasury;
