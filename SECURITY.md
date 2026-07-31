@@ -30,7 +30,7 @@ report, whichever comes first.
 
 ## Scope
 
-In scope — the deployed V2 contracts and this source:
+In scope — the deployed V3 contracts and this source:
 
 | Contract | Address |
 |---|---|
