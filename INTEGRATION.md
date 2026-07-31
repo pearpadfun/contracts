@@ -1,4 +1,4 @@
-# Pearpad integration guide — swapping
+# Pearpad integration guide: swapping
 
 For agents implementing buy/sell against Pearpad on **Stable mainnet (chain id 988)**, RPC `https://rpc.stable.xyz`.
 
@@ -17,7 +17,7 @@ ABIs: inlined at the bottom of this file (plain arrays, ready for viem/ethers).
 
 Every token launches on a bonding curve inside the **Factory**. When the curve's real reserve hits the token's target (per-token config, current default 6,375 USDT0), it auto-migrates to a Uniswap V3 pool (1% tier) at the curve's closing price and curve trading stops. After that, all swaps go through the **Router**.
 
-Every token's terms are frozen at launch — read `factory.configOf(token)` → `(virtualUsdt, targetUsdt, totalSupply, virtualTokens, creatorBps, treasuryBps, lpCreatorBps)`; the same struct rides on its `Launched` event and on every `/api/tokens` row as `cfg`.
+Every token's terms are frozen at launch. Read `factory.configOf(token)` → `(virtualUsdt, targetUsdt, totalSupply, virtualTokens, creatorBps, treasuryBps, lpCreatorBps)`; the same struct rides on its `Launched` event and on every `/api/tokens` row as `cfg`.
 
 Phase check: `factory.curves(token)` returns `(ethReserve, tokenReserve, creator, migrated, cfg)`.
 - `creator == 0x0` → not a pearpad token
@@ -28,9 +28,9 @@ The `Migrated(token, pool, tokenId)` event fires at the flip.
 
 ## Decimals
 
-All native-value amounts (msg.value, curve reserves, quotes, payouts) are **18-decimal USDT0**. Pearpad tokens are 18 decimals. Only the ERC-20 side of USDT0 (inside V3 pools) is 6 decimals — the Router converts internally; you never handle 6-dec amounts.
+All native-value amounts (msg.value, curve reserves, quotes, payouts) are **18-decimal USDT0**. Pearpad tokens are 18 decimals. Only the ERC-20 side of USDT0 (inside V3 pools) is 6 decimals, and the Router converts internally, so you never handle 6-dec amounts.
 
-## Phase 1 — bonding curve (Factory)
+## Phase 1: bonding curve (Factory)
 
 ```solidity
 // quotes (view)
@@ -45,11 +45,11 @@ sell(address token, uint256 tokensIn, uint256 minEthOut) → uint256 ethOut  // 
 - Per-trade bps are per token: `bps = cfg.creatorBps + cfg.treasuryBps` (current default 130).
 - `buy` quote for UI: `getTokensOut(token, msg.value * 10000 / (10000 + bps))` (bps come off msg.value first).
 - `sell` payout for UI: `gross = getEthOut(token, tokensIn)`, user receives `gross - gross*bps/10000`.
-- Buys that would push the reserve past the token's target are capped and the excess refunded; a buy that lands exactly on target triggers migration in the same tx (more gas — don't set tight gas limits).
+- Buys that would push the reserve past the token's target are capped and the excess refunded; a buy that lands exactly on target triggers migration in the same tx, which costs more gas, so don't set tight gas limits.
 - Events for indexing: `Launched(token, creator, metadata, cfg)`, `Bought(token, buyer, ethIn, tokensOut, ethReserve, tokenReserve)`, `Sold(...)`, `Migrated`.
-- Launching: `launch(name, symbol, metadata, maxFee)` payable — always read `launchFee()` (may change at any time; pass it as `maxFee` guard). Any value beyond the fee executes the creator's first buy atomically.
+- Launching: `launch(name, symbol, metadata, maxFee)` payable. Always read `launchFee()`, which may change at any time, and pass it as the `maxFee` guard. Any value beyond the fee executes the creator's first buy atomically.
 
-## Phase 2 — migrated (Router)
+## Phase 2: migrated (Router)
 
 ```solidity
 buy(address token, uint256 amountOutMin) payable → uint256 amountOut   // send USDT0 as msg.value
@@ -58,7 +58,7 @@ sell(address token, uint256 amountIn, uint256 amountOutMin) → uint256 ethOut  
 
 - Router fee: 1% on top of the pool's 1% tier.
 - `amountOutMin` on buy is in token units; on sell it's 18-dec native USDT0.
-- Quotes: no on-chain quoter wrapper — use the V3 pool directly (pool address from the `Migrated` event, or derive via the position manager factory) or eth_call-simulate the swap. Remember to knock 1% off msg.value before quoting the pool leg.
+- Quotes: no on-chain quoter wrapper exists. Use the V3 pool directly (pool address from the `Migrated` event, or derive via the position manager factory), or eth_call-simulate the swap. Remember to knock the router's `bps()` off msg.value before quoting the pool leg.
 
 ## Creator fees
 
@@ -69,7 +69,7 @@ collectFees(address token)   // permissionless, on the Factory
 One call settles a token's outstanding fees, before or after migration: it pays the
 token's creator and the treasury whatever the factory owes them, and once the token
 has migrated it also collects the locked LP position's accrued fees. Recipients are
-fixed by the contract — the caller supplies only the token address and receives
+fixed by the contract. The caller supplies only the token address and receives
 nothing, so anyone (a bot, a UI, the creator) can trigger it.
 
 `feesOwed(address)` reads what the factory currently owes an address. A creator can
@@ -176,21 +176,27 @@ async function launchToken(name, symbol, metadataUri, devBuy, account) {
 
 ## Public REST API
 
-Base URL: `https://pearpad.fun/api` — free to use, no key. Rate limit: 10 req/s per IP (burst 30); heavy usage gets HTTP 429. Data comes from the pearpad indexer and tracks the chain within a block or two (`asOf.block` in every response tells you where it is).
+Base URL: `https://pearpad.fun/api`, free to use, no key. Rate limit: 10 req/s per IP (burst 30); heavy usage gets HTTP 429. Data comes from the pearpad indexer and tracks the chain within a block or two. Most responses carry an `asOf` object of `{block, status}` telling you which block the data reflects; `/profiles` and `/meta` are the exceptions and omit it. Errors return `{"detail": "..."}`.
 
 | Endpoint | Returns |
 |---|---|
-| `GET /tokens` | all launched tokens: address, name, symbol, creator, metadata URI, parsed meta, logo, deploy block/time |
-| `GET /tokens/<address>` | one token's detail |
-| `GET /tokens/<address>/trades?limit=100` | trade history (buy/sell, amounts, tx hash, block, time; max 500) |
-| `GET /tokens/<address>/bars?res=60` | OHLC candles at `res` seconds for charts |
+| `GET /tokens` | tokens active in the last 24h, newest first, capped at 500 |
+| `GET /tokens/<address>` | one token's detail, same row shape as the list |
+| `GET /tokens/<address>/trades?limit=100` | trade history (side, src, amounts, reserves, tx hash, block, time; max 500) |
+| `GET /tokens/<address>/bars?step=60&from=&to=` | true OHLC bars as `{t,o,h,l,c,v}` |
+| `GET /tokens/<address>/candles?step=60&since=` | lighter high/low buckets as `{bucket,lo,hi,vol,n}` |
 | `GET /tokens/<address>/holders?limit=50` | holder addresses and balances (max 200) |
-| `GET /tokens/<address>/meta` | token's IPFS metadata JSON |
-| `GET /live` | Server-Sent Events stream — pushes an event whenever the indexer sees new activity; listen here instead of polling |
+| `GET /tokens/<address>/meta` | the token's logo plus its IPFS metadata |
+| `GET /profiles` | address-keyed map of usernames and avatars |
+| `GET /live` | Server-Sent Events. Each event names the tokens that moved and embeds their rows plus recent trades, so listen here instead of polling |
+
+`step` is one of `60, 300, 900, 3600, 14400, 86400` seconds. `from`, `to` and `since` are unix seconds. An unrecognised parameter name is ignored rather than rejected, so a typo silently returns the default bucket size.
+
+Amounts and balances are decimal strings in base units, since they overflow a JSON number. Prices are floats.
 
 Example:
 
 ```bash
 curl https://pearpad.fun/api/tokens
-curl "https://pearpad.fun/api/tokens/0x03064d279c288366f93E8446792ff19884573f52/trades?limit=20"
+curl "https://pearpad.fun/api/tokens/0xeb4ba862119ba6db283c411f060df0a3d53f2f0f/trades?limit=20"
 ```

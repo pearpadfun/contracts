@@ -37,14 +37,14 @@ verified bytecode at these addresses.
 
 ## Integration
 
-Building on top of pearpad? See **[INTEGRATION.md](INTEGRATION.md)** — the full buy/sell guide (two trading phases, quote math, viem/ethers examples).
+Building on top of pearpad starts with **[INTEGRATION.md](INTEGRATION.md)**, the full buy/sell guide: two trading phases, quote math, viem and ethers examples.
 
-Contract ABIs live in [`abi/`](abi/), ready for viem/ethers:
+Contract ABIs live in [`abi/`](abi/), ready for viem or ethers:
 
-- [`abi/PearpadFactory.json`](abi/PearpadFactory.json) — launch + bonding-curve trading
-- [`abi/PearpadRouter.json`](abi/PearpadRouter.json) — post-graduation swaps
-- [`abi/PearpadToken.json`](abi/PearpadToken.json) — the per-launch ERC-20
-- [`abi/PearpadLocker.json`](abi/PearpadLocker.json) — locked LP
+- [`abi/PearpadFactory.json`](abi/PearpadFactory.json): launch and bonding-curve trading
+- [`abi/PearpadRouter.json`](abi/PearpadRouter.json): post-graduation swaps
+- [`abi/PearpadToken.json`](abi/PearpadToken.json): the per-launch ERC-20
+- [`abi/PearpadLocker.json`](abi/PearpadLocker.json): locked LP
 
 ## Build
 
