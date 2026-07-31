@@ -10,7 +10,7 @@ finding against live user funds.
 ## What to include
 
 - Which contract and function, ideally with a line reference.
-- How to reproduce it — a Foundry test is ideal, a transaction hash or a clear
+- How to reproduce it. A Foundry test is ideal; a transaction hash or a clear
   description is fine.
 - What an attacker gains: funds, another user's position, or admin control.
 
@@ -30,7 +30,7 @@ report, whichever comes first.
 
 ## Scope
 
-In scope — the deployed V3 contracts and this source:
+In scope: the deployed V3 contracts and this source.
 
 | Contract | Address |
 |---|---|
@@ -39,7 +39,7 @@ In scope — the deployed V3 contracts and this source:
 | PearpadRouter  | `0x19b824Bf30424f89D9d8BEC940232234fE79226A` |
 
 Plus every `PearpadToken` the factory deploys. All are verified on
-[Stablescan](https://stablescan.xyz) — check the verified source before
+[Stablescan](https://stablescan.xyz). Check the verified source before
 reporting against a local build, since compiler settings affect bytecode.
 
 Out of scope:
@@ -47,8 +47,8 @@ Out of scope:
 - The deprecated V1 launchpad and the abandoned July 2026 test deployment.
   V1 still holds redeemable curve reserves for its holders but is unsupported.
 - Uniswap v3, Multicall3, USDT0, and the Stable chain itself.
-- Gas-optimization suggestions and style preferences — send those as a normal
-  issue or PR, they are welcome, just not security reports.
+- Gas-optimization suggestions and style preferences. Send those as a normal
+  issue or PR. They are welcome, they just are not security reports.
 
 ## Testing
 
@@ -59,8 +59,8 @@ forge test --fork-url https://rpc.stable.xyz
 ```
 
 Use your own wallets and your own funds if you must touch mainnet, and stop at
-proof of concept — move one wei, not the balance. Stay inside these rules and
-we will not pursue or support legal action against you for your research.
+proof of concept: move one wei, not the balance. Stay inside these rules and we
+will not pursue or support legal action against you for your research.
 
 ## Rewards
 
@@ -69,7 +69,7 @@ our discretion and will credit you publicly if you want it.
 
 ## Known design decisions
 
-Not bugs — no need to report:
+We chose these deliberately. No need to report them:
 
 - **The treasury is the sole admin.** It sets the launch fee, can pause
   launches, and can change the default curve configuration. Each token
