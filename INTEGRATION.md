@@ -7,7 +7,7 @@ For agents implementing buy/sell against Pearpad on **Stable mainnet (chain id 9
 | Contract | Address | Role |
 |---|---|---|
 | PearpadFactory | `0x341d613Cd110c602713E23cFE8826Aed54fa026F` | Launches tokens, bonding-curve trading pre-migration |
-| PearpadRouter | `0x19b824Bf30424f89D9d8BEC940232234fE79226A` | Swaps post-migration (wraps Uniswap V3 + 1% fee) |
+| PearpadRouter | `0x19b824Bf30424f89D9d8BEC940232234fE79226A` | Swaps post-migration (wraps Uniswap V3) |
 | PearpadLocker | `0xb3a22d7d9617fF151415E228Ce10d5D42D0fc5Ee` | Holds locked LP; not needed for swapping |
 | USDT0 | `0x779Ded0c9e1022225f8E0630b35a9b54bE713736` | Dual-role: native gas token (18 dec) AND ERC-20 (6 dec) on the same balance |
 
@@ -15,7 +15,7 @@ ABIs: inlined at the bottom of this file (plain arrays, ready for viem/ethers).
 
 ## Key concept: two trading phases
 
-Every token launches on a bonding curve inside the **Factory**. When the curve's real reserve hits the token's target (per-token config, current default 6,375 USDT0), it auto-migrates to a Uniswap V3 pool (1% tier) at the curve's closing price and curve trading stops. After that, all swaps go through the **Router**.
+Every token launches on a bonding curve inside the **Factory**. When the curve's real reserve hits the token's target (per-token config, current default 6,375 USDT0), it auto-migrates to a Uniswap V3 pool at the curve's closing price and curve trading stops. The pool's fee tier is `POOL_FEE` on the Factory and the Router, which you need to derive the pool address. After that, all swaps go through the **Router**.
 
 Every token's terms are frozen at launch. Read `factory.configOf(token)` → `(virtualUsdt, targetUsdt, totalSupply, virtualTokens, creatorBps, treasuryBps, lpCreatorBps)`; the same struct rides on its `Launched` event and on every `/api/tokens` row as `cfg`.
 
@@ -42,7 +42,7 @@ buy(address token, uint256 minTokensOut) payable → uint256 tokensOut  // send 
 sell(address token, uint256 tokensIn, uint256 minEthOut) → uint256 ethOut  // approve factory for tokensIn first
 ```
 
-- Per-trade bps are per token: `bps = cfg.creatorBps + cfg.treasuryBps` (current default 130).
+- Per-trade bps are per token: `bps = cfg.creatorBps + cfg.treasuryBps`. Read them from the token's config; never hardcode them, since each token carries its own and they are fixed at its launch.
 - `buy` quote for UI: `getTokensOut(token, msg.value * 10000 / (10000 + bps))` (bps come off msg.value first).
 - `sell` payout for UI: `gross = getEthOut(token, tokensIn)`, user receives `gross - gross*bps/10000`.
 - Buys that would push the reserve past the token's target are capped and the excess refunded; a buy that lands exactly on target triggers migration in the same tx, which costs more gas, so don't set tight gas limits.
@@ -56,7 +56,7 @@ buy(address token, uint256 amountOutMin) payable → uint256 amountOut   // send
 sell(address token, uint256 amountIn, uint256 amountOutMin) → uint256 ethOut  // approve router for amountIn first
 ```
 
-- Router fee: 1% on top of the pool's 1% tier.
+- The router takes its own bps on top of the pool's fee tier. Read them with `router.bps()` and `router.POOL_FEE()`.
 - `amountOutMin` on buy is in token units; on sell it's 18-dec native USDT0.
 - Quotes: no on-chain quoter wrapper exists. Use the V3 pool directly (pool address from the `Migrated` event, or derive via the position manager factory), or eth_call-simulate the swap. Remember to knock the router's `bps()` off msg.value before quoting the pool leg.
 
@@ -107,10 +107,18 @@ async function isMigrated(token) {
   return migrated
 }
 
+// ---- per-token bps: read from its config, never hardcode ----
+async function curveBps(token) {
+  const cfg = await pub.readContract({ address: FACTORY, abi: factoryAbi,
+    functionName: 'configOf', args: [token] })
+  return BigInt(cfg.creatorBps) + BigInt(cfg.treasuryBps)
+}
+
 // ---- curve buy (pre-migration): spend 5 USDT0 with 1% slippage ----
 async function curveBuy(token, account) {
   const value = parseEther('5')
-  const ethIn = (value * 10_000n) / 10_130n            // fee comes off msg.value
+  const bps = await curveBps(token)
+  const ethIn = (value * 10_000n) / (10_000n + bps)    // bps come off msg.value first
   const quote = await pub.readContract({ address: FACTORY, abi: factoryAbi,
     functionName: 'getTokensOut', args: [token, ethIn] })
   return wallet.writeContract({ address: FACTORY, abi: factoryAbi, functionName: 'buy',
@@ -121,9 +129,10 @@ async function curveBuy(token, account) {
 async function curveSell(token, amount, account) {
   await wallet.writeContract({ address: token, abi: erc20Abi, functionName: 'approve',
     args: [FACTORY, amount], account })
+  const bps = await curveBps(token)
   const gross = await pub.readContract({ address: FACTORY, abi: factoryAbi,
     functionName: 'getEthOut', args: [token, amount] })
-  const net = gross - (gross * 130n) / 10_000n         // 1.3% fee off gross
+  const net = gross - (gross * bps) / 10_000n          // quote is gross; you receive net
   return wallet.writeContract({ address: FACTORY, abi: factoryAbi, functionName: 'sell',
     args: [token, amount, (net * 99n) / 100n], account })
 }
