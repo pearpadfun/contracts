@@ -1,6 +1,6 @@
 # Security policy
 
-These contracts are live on Stable Mainnet (chain 988) and hold real funds.
+These contracts are live on Stable Mainnet (chain 988) and HyperEVM (chain 999) and hold real funds.
 
 **Report a vulnerability: security@pearpad.fun**
 
@@ -30,7 +30,9 @@ report, whichever comes first.
 
 ## Scope
 
-In scope: the deployed V3 contracts and this source.
+In scope: the deployed contracts on both chains, and this source.
+
+**Stable, chain 988**, verified on [Stablescan](https://stablescan.xyz):
 
 | Contract | Address |
 |---|---|
@@ -38,15 +40,25 @@ In scope: the deployed V3 contracts and this source.
 | PearpadLocker  | `0xb3a22d7d9617fF151415E228Ce10d5D42D0fc5Ee` |
 | PearpadRouter  | `0x19b824Bf30424f89D9d8BEC940232234fE79226A` |
 
-Plus every `PearpadToken` the factory deploys. All are verified on
-[Stablescan](https://stablescan.xyz). Check the verified source before
-reporting against a local build, since compiler settings affect bytecode.
+**HyperEVM, chain 999**, verified on [hyperevmscan](https://hyperevmscan.io):
+
+| Contract | Address |
+|---|---|
+| PearpadLauncher | `0x4e1408e143153Caa6D77FBb571452A26f94854cC` |
+
+Plus every per-launch token these deploy. Check the verified source before
+reporting against a local build, since compiler settings affect bytecode. The
+two chains pin **different** `evm_version` values: `osaka` on 988, `cancun` on
+999. Building either with the other's pin will not reproduce.
 
 Out of scope:
 
 - The deprecated V1 launchpad and the abandoned July 2026 test deployment.
   V1 still holds redeemable curve reserves for its holders but is unsupported.
-- Uniswap v3, Multicall3, USDT0, and the Stable chain itself.
+- Uniswap v3, Multicall3, USDT0, WHYPE, PRJX, HyperSwap, and the Stable and
+  HyperEVM chains themselves.
+- Pools created for a pearpad token on any venue we did not deploy. Anyone may
+  create one at any price. Our contracts neither know nor control them.
 - Gas-optimization suggestions and style preferences. Send those as a normal
   issue or PR. They are welcome, they just are not security reports.
 

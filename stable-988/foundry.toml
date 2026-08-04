@@ -1,0 +1,13 @@
+[profile.default]
+src = "src"
+out = "out"
+libs = ["lib"]
+optimizer = true
+optimizer_runs = 269
+# ⛔ PINNED. The deployed contracts on chain 988 were built with this exact
+# version, and Stablescan verified that bytecode. Building without the pin
+# produces different bytecode and the verification will not reproduce.
+evm_version = "osaka"
+
+[rpc_endpoints]
+stable = "${STABLE_RPC_URL}"

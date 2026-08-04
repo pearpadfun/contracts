@@ -1,0 +1,13 @@
+[profile.default]
+src = "src"
+out = "out"
+libs = ["lib"]
+optimizer = true
+optimizer_runs = 269
+# ⛔ PINNED, and DIFFERENT from chain 988. HyperEVM is Cancun without blobs;
+# the deployed launcher was built with this and verified on hyperevmscan.
+# Do not copy 988's "osaka" here — the bytecode would not reproduce.
+evm_version = "cancun"
+
+[rpc_endpoints]
+hyperevm = "https://rpc.hyperliquid.xyz/evm"

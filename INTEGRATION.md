@@ -2,6 +2,12 @@
 
 For agents implementing buy/sell against Pearpad on **Stable mainnet (chain id 988)**, RPC `https://rpc.stable.xyz`.
 
+> **Scope: chain 988 only.** This guide describes the bonding-curve model in
+> [`stable-988/`](stable-988/). The HyperEVM launcher in
+> [`hyperevm-999/`](hyperevm-999/) has no curve and no migration. Those tokens
+> trade on their Uniswap v3 pool from block one, so you swap through the venue's
+> own router rather than through a pearpad contract.
+
 ## Deployed contracts
 
 | Contract | Address | Role |
