@@ -30,16 +30,21 @@ pragma solidity ^0.8.24;
 //  ██║     ███████╗██║  ██║██║  ██║██║     ██║  ██║██████╔╝
 //  ╚═╝     ╚══════╝╚═╝  ╚═╝╚═╝  ╚═╝╚═╝     ╚═╝  ╚═╝╚═════╝
 //
-//  pear-launch-hype-v1.0.0 · HyperEVM (id 999) · https://pearpad.fun · © 2026 PEARPAD
+//  pear-launch-hype-v1.2.0 · HyperEVM (id 999) · https://pearpad.fun · © 2026 PEARPAD
 
 import {IERC20} from "openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "openzeppelin-contracts/contracts/token/ERC20/utils/SafeERC20.sol";
 import {ReentrancyGuard} from "openzeppelin-contracts/contracts/utils/ReentrancyGuard.sol";
 import {PearpadLaunchToken} from "./PearpadLaunchToken.sol";
+import {PearpadLocker} from "./PearpadLocker.sol";
 
 interface IUniswapV3PoolState {
     function slot0() external view returns (uint160 sqrtPriceX96, int24 tick, uint16, uint16, uint16, uint8, bool);
     function tickSpacing() external view returns (int24);
+
+    function swap(address recipient, bool zeroForOne, int256 amountSpecified, uint160 sqrtPriceLimitX96, bytes calldata data)
+        external
+        returns (int256 amount0, int256 amount1);
 }
 
 interface ISwapRouter {
@@ -145,6 +150,8 @@ contract PearpadLauncher is ReentrancyGuard {
     uint256 public constant CREATOR_SHARE_BPS = 6_000;
     uint256 internal constant BPS = 10_000;
 
+    uint256 public constant CORRECTION_MAX_SUPPLY_BPS = 1_000;
+
     uint160 internal constant SQRT_MCAP_50_T0 = 17715955711429571029610171;
     uint160 internal constant SQRT_MCAP_50_T1 = 354319114228591420592203432321452;
     uint160 internal constant SQRT_MCAP_100_T0 = 25054144837504793118641380;
@@ -155,8 +162,11 @@ contract PearpadLauncher is ReentrancyGuard {
     uint160 internal constant SQRT_MCAP_500_T1 = 112045541949572279837463876454916;
 
     IERC20 public immutable whype;
+    PearpadLocker public immutable locker;
 
     address public treasury;
+
+    address internal expectedPool;
 
     Venue[] public venues;
 
@@ -165,15 +175,16 @@ contract PearpadLauncher is ReentrancyGuard {
     uint256 public launchCount;
 
     error PoolPriceMismatch(uint160 expected, uint160 actual);
+    error BadCallback();
     error FeeNotPaid(uint256 sent, uint256 required);
     error BadSeedBuy();
     error QuoteMissing(uint256 have, uint256 need);
-    error UnknownLaunch(uint256 launchId);
     error FeeTransferFailed();
     error RefundFailed();
     error NotTreasury();
     error NoSuchVenue(uint256 venueId);
     error VenueDisabled(uint256 venueId);
+    error NoBlockEntropy();
 
     modifier onlyTreasury() {
         if (msg.sender != treasury) revert NotTreasury();
@@ -201,13 +212,14 @@ contract PearpadLauncher is ReentrancyGuard {
 
     event LaunchFeePaid(address indexed payer, address indexed recipient, uint256 amount);
 
-    event FeesCollected(
-        uint256 indexed launchId,
+    event PoolCorrected(
         address indexed token,
-        uint256 tokenFees,
-        uint256 quoteTotal,
-        uint256 toCreator,
-        uint256 toTreasury
+        address indexed pool,
+        uint160 foundAt,
+        uint160 target,
+        uint160 reached,
+        uint256 supplySold,
+        uint256 quoteReceived
     );
 
     constructor(
@@ -220,6 +232,7 @@ contract PearpadLauncher is ReentrancyGuard {
     ) {
         require(address(whype_) != address(0) && treasury_ != address(0), "zero address");
         whype = whype_;
+        locker = new PearpadLocker(whype_);
         treasury = treasury_;
         _addVenue(positionManager0_, swapRouter0_);
         _addVenue(positionManager1_, swapRouter1_);
@@ -267,8 +280,11 @@ contract PearpadLauncher is ReentrancyGuard {
         uint256 required = LAUNCH_FEE + seedTotal;
         if (msg.value < required) revert FeeNotPaid(msg.value, required);
 
+        bytes32 entropy = blockhash(block.number - 1);
+        if (entropy == bytes32(0)) revert NoBlockEntropy();
+
         token = address(
-            new PearpadLaunchToken{salt: keccak256(abi.encode(msg.sender, p.salt))}(
+            new PearpadLaunchToken{salt: keccak256(abi.encode(msg.sender, p.salt, entropy))}(
                 p.name, p.symbol, p.metadata, msg.sender
             )
         );
@@ -290,6 +306,9 @@ contract PearpadLauncher is ReentrancyGuard {
     function _settle(address token, uint256 required) internal {
         uint256 leftover = IERC20(token).balanceOf(address(this));
         if (leftover > 0) IERC20(token).safeTransfer(msg.sender, leftover);
+
+        uint256 quoteLeft = whype.balanceOf(address(this));
+        if (quoteLeft > 0) whype.safeTransfer(treasury, quoteLeft);
 
         (bool feeOk,) = treasury.call{value: LAUNCH_FEE}("");
         if (!feeOk) revert FeeTransferFailed();
@@ -320,29 +339,31 @@ contract PearpadLauncher is ReentrancyGuard {
                 tokenIsToken0 ? token : address(whype), tokenIsToken0 ? address(whype) : token, POOL_FEE, sqrtPriceX96
             );
 
-            (uint160 poolSqrt, int24 curTick,,,,,) = IUniswapV3PoolState(pool).slot0();
+            (uint160 poolSqrt,,,,,,) = IUniswapV3PoolState(pool).slot0();
+            if (poolSqrt != sqrtPriceX96) _correctPool(pool, sqrtPriceX96, tokenIsToken0, token);
+
+            int24 curTick;
+            (poolSqrt, curTick,,,,,) = IUniswapV3PoolState(pool).slot0();
             if (poolSqrt != sqrtPriceX96) revert PoolPriceMismatch(sqrtPriceX96, poolSqrt);
 
             int24 spacing = IUniswapV3PoolState(pool).tickSpacing();
             int24 maxUsable = (MAX_TICK / spacing) * spacing;
 
             if (tokenIsToken0) {
-
                 tickLower = _ceilSpacing(curTick + 1, spacing);
                 tickUpper = maxUsable;
             } else {
-
                 tickLower = -maxUsable;
                 tickUpper = _floorSpacing(curTick, spacing);
             }
         }
 
-        IERC20(token).forceApprove(v.positionManager, TOTAL_SUPPLY);
         uint256 nftId = _mintFullSupply(v.positionManager, token, tokenIsToken0, tickLower, tickUpper);
 
         IERC20(token).forceApprove(v.positionManager, 0);
 
         launchId = ++launchCount;
+        locker.register(launchId, nftId, token, msg.sender, v.positionManager, v.swapRouter);
         launches[launchId] = Position({
             token: token,
             pool: pool,
@@ -366,6 +387,8 @@ contract PearpadLauncher is ReentrancyGuard {
         int24 tickLower,
         int24 tickUpper
     ) internal returns (uint256 nftId) {
+        uint256 supply = IERC20(token).balanceOf(address(this));
+        IERC20(token).forceApprove(positionManager, supply);
         (nftId,,,) = INonfungiblePositionManager(positionManager).mint(
             INonfungiblePositionManager.MintParams({
                 token0: tokenIsToken0 ? token : address(whype),
@@ -373,23 +396,60 @@ contract PearpadLauncher is ReentrancyGuard {
                 fee: POOL_FEE,
                 tickLower: tickLower,
                 tickUpper: tickUpper,
-                amount0Desired: tokenIsToken0 ? TOTAL_SUPPLY : 0,
-                amount1Desired: tokenIsToken0 ? 0 : TOTAL_SUPPLY,
+                amount0Desired: tokenIsToken0 ? supply : 0,
+                amount1Desired: tokenIsToken0 ? 0 : supply,
                 amount0Min: 0,
                 amount1Min: 0,
-                recipient: address(this),
+                recipient: address(locker),
                 deadline: block.timestamp
             })
         );
+    }
+
+    function _correctPool(address pool, uint160 target, bool tokenIsToken0, address token) internal {
+        (uint160 current,,,,,,) = IUniswapV3PoolState(pool).slot0();
+        bool zeroForOne = current > target;
+        bool inputIsToken = zeroForOne == tokenIsToken0;
+
+        int256 amountIn;
+        if (inputIsToken) {
+            uint256 cap = TOTAL_SUPPLY * CORRECTION_MAX_SUPPLY_BPS / BPS;
+            uint256 bal = IERC20(token).balanceOf(address(this));
+            amountIn = int256(bal < cap ? bal : cap);
+        } else {
+            amountIn = int256(1e18);
+        }
+
+        uint256 tokenBefore = IERC20(token).balanceOf(address(this));
+        expectedPool = pool;
+        IUniswapV3PoolState(pool).swap(address(this), zeroForOne, amountIn, target, abi.encode(token, tokenIsToken0));
+        expectedPool = address(0);
+
+        uint256 sold = tokenBefore - IERC20(token).balanceOf(address(this));
+        uint256 gained = whype.balanceOf(address(this));
+        (uint160 reached,,,,,,) = IUniswapV3PoolState(pool).slot0();
+        emit PoolCorrected(token, pool, current, target, reached, sold, gained);
+
+        if (gained > 0) whype.safeTransfer(treasury, gained);
+    }
+
+    function uniswapV3SwapCallback(int256 amount0Delta, int256 amount1Delta, bytes calldata data) external {
+        if (msg.sender != expectedPool || msg.sender == address(0)) revert BadCallback();
+        (address token, bool tokenIsToken0) = abi.decode(data, (address, bool));
+        address token0 = tokenIsToken0 ? token : address(whype);
+        address token1 = tokenIsToken0 ? address(whype) : token;
+        if (amount0Delta > 0) IERC20(token0).safeTransfer(msg.sender, uint256(amount0Delta));
+        if (amount1Delta > 0) IERC20(token1).safeTransfer(msg.sender, uint256(amount1Delta));
     }
 
     function _runSeedBuys(address token, SeedBuy[] calldata seedBuys, uint256 seedTotal, address swapRouter)
         internal
     {
 
+        uint256 quoteBefore = whype.balanceOf(address(this));
         IWHYPE(address(whype)).deposit{value: seedTotal}();
-        uint256 have = whype.balanceOf(address(this));
-        if (have < seedTotal) revert QuoteMissing(have, seedTotal);
+        uint256 credited = whype.balanceOf(address(this)) - quoteBefore;
+        if (credited < seedTotal) revert QuoteMissing(credited, seedTotal);
 
         whype.forceApprove(swapRouter, seedTotal);
         for (uint256 i = 0; i < seedBuys.length; i++) {
@@ -411,56 +471,16 @@ contract PearpadLauncher is ReentrancyGuard {
         whype.forceApprove(swapRouter, 0);
     }
 
-    function collect(uint256 launchId) external nonReentrant returns (uint256 toCreator, uint256 toTreasury) {
-        Position memory p = launches[launchId];
-        if (p.token == address(0)) revert UnknownLaunch(launchId);
-
-        INonfungiblePositionManager(p.positionManager).collect(
-            INonfungiblePositionManager.CollectParams({
-                tokenId: p.nftId,
-                recipient: address(this),
-                amount0Max: type(uint128).max,
-                amount1Max: type(uint128).max
-            })
-        );
-
-        uint256 tokenBal = IERC20(p.token).balanceOf(address(this));
-        if (tokenBal > 0) {
-            IERC20(p.token).forceApprove(p.swapRouter, tokenBal);
-            ISwapRouter(p.swapRouter).exactInputSingle(
-                ISwapRouter.ExactInputSingleParams({
-                    tokenIn: p.token,
-                    tokenOut: address(whype),
-                    fee: POOL_FEE,
-                    recipient: address(this),
-                    deadline: block.timestamp,
-                    amountIn: tokenBal,
-                    amountOutMinimum: 0,
-                    sqrtPriceLimitX96: 0
-                })
-            );
-            IERC20(p.token).forceApprove(p.swapRouter, 0);
-        }
-
-        uint256 quoteTotal = whype.balanceOf(address(this));
-        if (quoteTotal > 0) {
-            (toCreator, toTreasury) = feeSplit(quoteTotal);
-            if (toCreator > 0) whype.safeTransfer(p.creator, toCreator);
-            if (toTreasury > 0) whype.safeTransfer(treasury, toTreasury);
-        }
-
-        emit FeesCollected(launchId, p.token, tokenBal, quoteTotal, toCreator, toTreasury);
-    }
-
-    function predictTokenAddress(
+    function computeTokenAddress(
         string calldata name_,
         string calldata symbol_,
         string calldata metadata_,
         address deployer,
-        bytes32 salt
+        bytes32 salt,
+        bytes32 entropy
     ) external view returns (address) {
         bytes32 initHash = initCodeHash(name_, symbol_, metadata_, deployer);
-        bytes32 create2Salt = keccak256(abi.encode(deployer, salt));
+        bytes32 create2Salt = keccak256(abi.encode(deployer, salt, entropy));
         return address(
             uint160(uint256(keccak256(abi.encodePacked(bytes1(0xff), address(this), create2Salt, initHash))))
         );

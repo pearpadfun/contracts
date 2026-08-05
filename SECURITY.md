@@ -44,7 +44,7 @@ In scope: the deployed contracts on both chains, and this source.
 
 | Contract | Address |
 |---|---|
-| PearpadLauncher | `0x4e1408e143153Caa6D77FBb571452A26f94854cC` |
+| PearpadLauncher | `0x5b55e899014fb2b69E21Dcb2dB3c72b56b79dadB` (locker `0xb2DF152F6b820dE1b73a79E285E430b14c3be9Ee`) |
 
 Plus every per-launch token these deploy. Check the verified source before
 reporting against a local build, since compiler settings affect bytecode. The

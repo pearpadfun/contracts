@@ -46,11 +46,15 @@ will not reproduce the verified deployment.
 
 | Contract | Address |
 |---|---|
-| PearpadLauncher | `0x4e1408e143153Caa6D77FBb571452A26f94854cC` |
+| PearpadLauncher | `0x5b55e899014fb2b69E21Dcb2dB3c72b56b79dadB` |
+| PearpadLocker | `0xb2DF152F6b820dE1b73a79E285E430b14c3be9Ee` |
 
 - **PearpadLauncher**: one transaction deploys a fixed-supply token and mints
   the whole supply as a single-sided Uniswap v3 range just above spot. The
   canonical pool is the market from block one. The contract holds no reserve.
+- **PearpadLocker**: holds every launch's LP position permanently. It has no
+  transfer, burn or decreaseLiquidity path — only fee collection, which pays the
+  creator and the treasury.
 - **PearpadLaunchToken**: the ERC-20 minted per launch.
 
 Venues are a registry, snapshotted per launch: venue 0 is PRJX V3, venue 1 is
