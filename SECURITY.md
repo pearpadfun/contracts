@@ -84,13 +84,16 @@ our discretion and will credit you publicly if you want it.
 We chose these deliberately. No need to report them:
 
 - **The treasury is the sole admin.** It sets the launch fee, can pause
-  launches, and can change the default curve configuration. Each token
-  snapshots its configuration at launch, so changes never apply retroactively
-  to a live curve.
-- **`usdt0` is immutable by design.** It denominates every live curve reserve;
-  making it settable would strand funds.
-- **Liquidity is locked forever** in `PearpadLocker` at graduation. There is no
-  withdrawal path, only fee collection.
+  launches, and can change the default configuration future launches use. Each
+  token snapshots its configuration at launch, so changes never apply
+  retroactively to a coin that is already trading.
+- **`usdt0` is immutable by design** on the Stable factory. It denominates every
+  live curve reserve; making it settable would strand funds.
+- **Liquidity is locked forever** in a `PearpadLocker`. There is no withdrawal
+  path, only fee collection. The two chains lock at different moments:
+  `stable-988` runs a bonding curve and locks at graduation, while
+  `hyperevm-999` mints the whole supply into a Uniswap v3 position at launch, so
+  it is locked from the first block and never graduates.
 - **Tokens have no owner, mint, pause, or blacklist functions** after launch.
 
 ## Contact
